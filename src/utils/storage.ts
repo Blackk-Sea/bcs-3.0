@@ -1,31 +1,33 @@
 import { LibraryData, Course, Subject } from '@/types/library';
-import { generateUid } from './bengali';
 
-export const STORAGE_KEY = 'bcs-resource-library-v3';
+export const STORAGE_KEY = 'bcs-resource-library-v4';
 
 export function getSeedData(): LibraryData {
-  const bcsSubjectId = generateUid();
-  const englishSubjectId = generateUid();
-  const defaultCourseId = generateUid();
+  const defaultCourseId = 'course-bcs-preliminary';
+  const bankCourseId = 'course-bank-jobs';
+
+  const bcsSubject1Id = 'subj-bcs-affairs';
+  const bcsSubject2Id = 'subj-english';
+  const bankSubject1Id = 'subj-banking-gk';
 
   const subjects: Subject[] = [
     {
-      id: bcsSubjectId,
+      id: bcsSubject1Id,
       name: 'বাংলাদেশ বিষয়াবলী',
       chapters: [
         {
-          id: generateUid(),
+          id: 'chap-constitution',
           name: 'সংবিধান ও মৌলিক অধিকার',
           resources: [
             {
-              id: generateUid(),
+              id: 'res-const-playlist',
               type: 'yt',
               title: 'সংবিধান — সম্পূর্ণ ক্লাস প্লেলিস্ট',
               url: 'https://youtube.com',
               completed: true,
             },
             {
-              id: generateUid(),
+              id: 'res-fundamental-rights-note',
               type: 'drive',
               title: 'মৌলিক অধিকার — হ্যান্ডনোট PDF',
               url: 'https://drive.google.com',
@@ -35,11 +37,11 @@ export function getSeedData(): LibraryData {
           isCollapsed: false,
         },
         {
-          id: generateUid(),
+          id: 'chap-liberation-war',
           name: 'মুক্তিযুদ্ধ ও স্বাধীনতা',
           resources: [
             {
-              id: generateUid(),
+              id: 'res-1971-docu',
               type: 'yt',
               title: '১৯৭১ মুক্তিযুদ্ধ ডকুমেন্টারি',
               url: 'https://youtube.com',
@@ -51,15 +53,15 @@ export function getSeedData(): LibraryData {
       ],
     },
     {
-      id: englishSubjectId,
+      id: bcsSubject2Id,
       name: 'English',
       chapters: [
         {
-          id: generateUid(),
+          id: 'chap-vocab',
           name: 'Vocabulary (Word Smart)',
           resources: [
             {
-              id: generateUid(),
+              id: 'res-active-recall',
               type: 'yt',
               title: 'Active Recall Methods',
               url: 'https://youtube.com',
@@ -79,19 +81,19 @@ export function getSeedData(): LibraryData {
       subjects,
     },
     {
-      id: generateUid(),
+      id: bankCourseId,
       name: 'ব্যাংক জবস প্রস্তুতি কোর্স',
       subjects: [
         {
-          id: generateUid(),
+          id: bankSubject1Id,
           name: 'General Knowledge & Banking',
           chapters: [
             {
-              id: generateUid(),
+              id: 'chap-banking-fund',
               name: 'Banking Fundamentals',
               resources: [
                 {
-                  id: generateUid(),
+                  id: 'res-banking-note',
                   type: 'drive',
                   title: 'Banking Terminology Note PDF',
                   url: 'https://drive.google.com',
@@ -109,7 +111,7 @@ export function getSeedData(): LibraryData {
   return {
     courses,
     selectedCourseId: defaultCourseId,
-    selectedSubjectId: bcsSubjectId,
+    selectedSubjectId: bcsSubject1Id,
     theme: 'dark',
   };
 }
@@ -117,12 +119,11 @@ export function getSeedData(): LibraryData {
 export function normalizeCourses(raw: any): Course[] {
   if (!raw) return [];
 
-  // Migration logic if raw is array of subjects (legacy format)
+  // Migration logic if raw is array of subjects (legacy v1/v2 format)
   if (Array.isArray(raw) && raw.length > 0 && !raw[0].subjects) {
-    const courseId = generateUid();
     return [
       {
-        id: courseId,
+        id: 'course-migrated-legacy',
         name: 'বিসিএস প্রস্তুতি কোর্স',
         subjects: normalizeSubjects(raw),
       },
@@ -130,8 +131,8 @@ export function normalizeCourses(raw: any): Course[] {
   }
 
   if (Array.isArray(raw)) {
-    return raw.map((c: any) => ({
-      id: c.id || generateUid(),
+    return raw.map((c: any, index: number) => ({
+      id: c.id || `course-norm-${index}-${Date.now()}`,
       name: c.name || 'শিরোনামহীন কোর্স',
       subjects: normalizeSubjects(c.subjects),
     }));
@@ -142,16 +143,16 @@ export function normalizeCourses(raw: any): Course[] {
 
 export function normalizeSubjects(rawSubjects: any[]): Subject[] {
   if (!Array.isArray(rawSubjects)) return [];
-  return rawSubjects.map((s) => ({
-    id: s.id || generateUid(),
+  return rawSubjects.map((s, index) => ({
+    id: s.id || `subj-norm-${index}-${Date.now()}`,
     name: s.name || 'শিরোনামহীন বিষয়',
     chapters: Array.isArray(s.chapters)
-      ? s.chapters.map((c: any) => ({
-          id: c.id || generateUid(),
+      ? s.chapters.map((c: any, cIdx: number) => ({
+          id: c.id || `chap-norm-${cIdx}-${Date.now()}`,
           name: c.name || 'শিরোনামহীন চ্যাপ্টার',
           resources: Array.isArray(c.resources)
-            ? c.resources.map((r: any) => ({
-                id: r.id || generateUid(),
+            ? c.resources.map((r: any, rIdx: number) => ({
+                id: r.id || `res-norm-${rIdx}-${Date.now()}`,
                 type: ['yt', 'drive', 'tg'].includes(r.type) ? r.type : 'yt',
                 title: r.title || 'শিরোনামহীন',
                 url: r.url || '',
@@ -169,27 +170,44 @@ export function loadLibraryFromStorage(): LibraryData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      // Check legacy v2 storage
-      const legacyRaw = localStorage.getItem('bcs-resource-library-v2');
-      if (legacyRaw) {
-        const legacyParsed = JSON.parse(legacyRaw);
-        if (legacyParsed && Array.isArray(legacyParsed.subjects)) {
-          const courses = normalizeCourses(legacyParsed.subjects);
-          return {
-            courses,
-            selectedCourseId: courses[0]?.id || null,
-            selectedSubjectId: courses[0]?.subjects[0]?.id || null,
-            theme: 'dark',
-          };
+      // Check legacy keys v3 / v2
+      const legacyV3 = localStorage.getItem('bcs-resource-library-v3');
+      const legacyV2 = localStorage.getItem('bcs-resource-library-v2');
+      const fallbackRaw = legacyV3 || legacyV2;
+      if (fallbackRaw) {
+        const legacyParsed = JSON.parse(fallbackRaw);
+        if (legacyParsed) {
+          const courses = normalizeCourses(legacyParsed.courses || legacyParsed.subjects);
+          if (courses.length > 0) {
+            const data: LibraryData = {
+              courses,
+              selectedCourseId: legacyParsed.selectedCourseId || courses[0].id,
+              selectedSubjectId: legacyParsed.selectedSubjectId || courses[0].subjects[0]?.id || null,
+              theme: legacyParsed.theme === 'light' ? 'light' : 'dark',
+            };
+            saveLibraryToStorage(data);
+            return data;
+          }
         }
       }
-      return getSeedData();
+      const initial = getSeedData();
+      saveLibraryToStorage(initial);
+      return initial;
     }
 
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.courses)) return getSeedData();
+    if (!parsed || !Array.isArray(parsed.courses)) {
+      const initial = getSeedData();
+      saveLibraryToStorage(initial);
+      return initial;
+    }
+
     const courses = normalizeCourses(parsed.courses);
-    if (courses.length === 0) return getSeedData();
+    if (courses.length === 0) {
+      const initial = getSeedData();
+      saveLibraryToStorage(initial);
+      return initial;
+    }
 
     const selectedCourseId =
       parsed.selectedCourseId && courses.some((c) => c.id === parsed.selectedCourseId)
@@ -216,6 +234,10 @@ export function loadLibraryFromStorage(): LibraryData {
 export function saveLibraryToStorage(data: LibraryData): void {
   if (typeof window === 'undefined') return;
   try {
+    // Safety check: Never save empty courses array over existing storage
+    if (!data || !Array.isArray(data.courses) || data.courses.length === 0) {
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch (err) {
     console.error('Failed to save library state to localStorage:', err);

@@ -35,7 +35,6 @@ export default function Home() {
   const [editModalState, setEditModalState] = useState<EditModalState | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Drag Payload Tracking
   const dragPayload = useRef<{
     type: 'course' | 'subject' | 'chapter' | 'resource';
     id: string;
@@ -44,7 +43,7 @@ export default function Home() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize from LocalStorage
+  // Initialize from LocalStorage on mount
   useEffect(() => {
     const data = loadLibraryFromStorage();
     setCourses(data.courses);
@@ -52,6 +51,7 @@ export default function Home() {
     setSelectedSubjectId(data.selectedSubjectId);
     const initialTheme = data.theme || 'dark';
     setTheme(initialTheme);
+
     if (initialTheme === 'light') {
       document.documentElement.classList.add('light');
     } else {
@@ -60,17 +60,23 @@ export default function Home() {
     setIsLoaded(true);
   }, []);
 
-  // Sync to LocalStorage on changes
-  useEffect(() => {
-    if (isLoaded) {
-      saveLibraryToStorage({
-        courses,
-        selectedCourseId,
-        selectedSubjectId,
-        theme,
-      });
-    }
-  }, [courses, selectedCourseId, selectedSubjectId, theme, isLoaded]);
+  // Atomic state updater and instant LocalStorage saver
+  const commitLibraryState = (
+    newCourses: Course[],
+    newCourseId: string | null = selectedCourseId,
+    newSubjectId: string | null = selectedSubjectId,
+    newTheme: 'dark' | 'light' = theme
+  ) => {
+    setCourses(newCourses);
+    setSelectedCourseId(newCourseId);
+    setSelectedSubjectId(newSubjectId);
+    saveLibraryToStorage({
+      courses: newCourses,
+      selectedCourseId: newCourseId,
+      selectedSubjectId: newSubjectId,
+      theme: newTheme,
+    });
+  };
 
   // Handle Theme Toggle
   const handleToggleTheme = () => {
@@ -81,6 +87,12 @@ export default function Home() {
     } else {
       document.documentElement.classList.remove('light');
     }
+    saveLibraryToStorage({
+      courses,
+      selectedCourseId,
+      selectedSubjectId,
+      theme: nextTheme,
+    });
     addToast(nextTheme === 'light' ? 'লাইট মোড সক্রিয় করা হয়েছে' : 'ডার্ক মোড সক্রিয় করা হয়েছে');
   };
 
@@ -147,9 +159,8 @@ export default function Home() {
       name,
       subjects: [],
     };
-    setCourses((prev) => [...prev, newCourse]);
-    setSelectedCourseId(newCourse.id);
-    setSelectedSubjectId(null);
+    const updated = [...courses, newCourse];
+    commitLibraryState(updated, newCourse.id, null);
     addToast('নতুন কোর্স যুক্ত হয়েছে');
   };
 
@@ -163,13 +174,10 @@ export default function Home() {
 
   const handleDeleteCourse = (id: string, name: string) => {
     if (!window.confirm(`“${name}” কোর্স এবং এর সব বিষয় মুছে ফেলবেন?`)) return;
-    setCourses((prev) => prev.filter((c) => c.id !== id));
-    if (selectedCourseId === id) {
-      const remaining = courses.filter((c) => c.id !== id);
-      const nextCourse = remaining.length > 0 ? remaining[0] : null;
-      setSelectedCourseId(nextCourse ? nextCourse.id : null);
-      setSelectedSubjectId(nextCourse && nextCourse.subjects[0] ? nextCourse.subjects[0].id : null);
-    }
+    const remaining = courses.filter((c) => c.id !== id);
+    const nextCourse = remaining.length > 0 ? remaining[0] : null;
+    const nextSubjectId = nextCourse && nextCourse.subjects[0] ? nextCourse.subjects[0].id : null;
+    commitLibraryState(remaining, nextCourse ? nextCourse.id : null, nextSubjectId);
     addToast('কোর্স মুছে ফেলা হয়েছে');
   };
 
@@ -181,71 +189,64 @@ export default function Home() {
       name,
       chapters: [],
     };
-    setCourses((prev) =>
-      prev.map((c) =>
-        c.id === currentCourse.id ? { ...c, subjects: [...c.subjects, newSubject] } : c
-      )
+    const updated = courses.map((c) =>
+      c.id === currentCourse.id ? { ...c, subjects: [...c.subjects, newSubject] } : c
     );
-    setSelectedSubjectId(newSubject.id);
+    commitLibraryState(updated, currentCourse.id, newSubject.id);
     addToast('নতুন বিষয় যুক্ত হয়েছে');
   };
 
   const handleDeleteSubject = (id: string, name: string) => {
     if (!currentCourse) return;
     if (!window.confirm(`“${name}” বিষয় মুছে ফেলবেন?`)) return;
-    setCourses((prev) =>
-      prev.map((c) =>
-        c.id === currentCourse.id
-          ? { ...c, subjects: c.subjects.filter((s) => s.id !== id) }
-          : c
-      )
+    const updated = courses.map((c) =>
+      c.id === currentCourse.id
+        ? { ...c, subjects: c.subjects.filter((s) => s.id !== id) }
+        : c
     );
-    if (selectedSubjectId === id) {
-      const remaining = currentCourse.subjects.filter((s) => s.id !== id);
-      setSelectedSubjectId(remaining.length > 0 ? remaining[0].id : null);
-    }
+    const remainingSubjects = currentCourse.subjects.filter((s) => s.id !== id);
+    const nextSubjectId = remainingSubjects.length > 0 ? remainingSubjects[0].id : null;
+    commitLibraryState(updated, currentCourse.id, nextSubjectId);
     addToast('বিষয় মুছে ফেলা হয়েছে');
   };
 
   // ---------- CHAPTER COLLAPSE / EXPAND ACTIONS ----------
   const handleToggleCollapseChapter = (chapterId: string) => {
     if (!currentCourse || !selectedSubject) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) =>
-                ch.id === chapterId ? { ...ch, isCollapsed: !ch.isCollapsed } : ch
-              ),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) =>
+              ch.id === chapterId ? { ...ch, isCollapsed: !ch.isCollapsed } : ch
+            ),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
   };
 
   const handleToggleExpandAllChapters = (expand: boolean) => {
     if (!currentCourse || !selectedSubject) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) => ({ ...ch, isCollapsed: !expand })),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) => ({ ...ch, isCollapsed: !expand })),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
     addToast(expand ? 'সব চ্যাপ্টার এক্সপ্যান্ড করা হয়েছে' : 'সব চ্যাপ্টার মিনিমাইজ করা হয়েছে');
   };
 
@@ -258,65 +259,62 @@ export default function Home() {
       resources: [],
       isCollapsed: false,
     };
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) =>
-            s.id === subjectId ? { ...s, chapters: [...s.chapters, newChapter] } : s
-          ),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) =>
+          s.id === subjectId ? { ...s, chapters: [...s.chapters, newChapter] } : s
+        ),
+      };
+    });
+    commitLibraryState(updated);
     addToast('নতুন চ্যাপ্টার যুক্ত হয়েছে');
   };
 
   const handleDeleteChapter = (chapterId: string) => {
     if (!currentCourse || !selectedSubject) return;
     if (!window.confirm('চ্যাপ্টারটি মুছে ফেলবেন?')) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) =>
-            s.id === selectedSubject.id
-              ? { ...s, chapters: s.chapters.filter((ch) => ch.id !== chapterId) }
-              : s
-          ),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) =>
+          s.id === selectedSubject.id
+            ? { ...s, chapters: s.chapters.filter((ch) => ch.id !== chapterId) }
+            : s
+        ),
+      };
+    });
+    commitLibraryState(updated);
     addToast('চ্যাপ্টার মুছে ফেলা হয়েছে');
   };
 
   const handleToggleAllChapterComplete = (chapterId: string) => {
     if (!currentCourse || !selectedSubject) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) => {
-                if (ch.id !== chapterId) return ch;
-                const allComplete =
-                  ch.resources.length > 0 && ch.resources.every((r) => r.completed);
-                const updatedResources = ch.resources.map((r) => ({
-                  ...r,
-                  completed: !allComplete,
-                }));
-                return { ...ch, resources: updatedResources };
-              }),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) => {
+              if (ch.id !== chapterId) return ch;
+              const allComplete =
+                ch.resources.length > 0 && ch.resources.every((r) => r.completed);
+              const updatedResources = ch.resources.map((r) => ({
+                ...r,
+                completed: !allComplete,
+              }));
+              return { ...ch, resources: updatedResources };
+            }),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
     addToast('চ্যাপ্টারের স্ট্যাটাস আপডেট করা হয়েছে');
   };
 
@@ -335,74 +333,71 @@ export default function Home() {
       url,
       completed: false,
     };
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) =>
-                ch.id === chapterId ? { ...ch, resources: [...ch.resources, newResource] } : ch
-              ),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) =>
+              ch.id === chapterId ? { ...ch, resources: [...ch.resources, newResource] } : ch
+            ),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
     addToast('রিসোর্স যুক্ত হয়েছে');
   };
 
   const handleToggleComplete = (chapterId: string, resourceId: string) => {
     if (!currentCourse || !selectedSubject) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) => {
-                if (ch.id !== chapterId) return ch;
-                return {
-                  ...ch,
-                  resources: ch.resources.map((r) =>
-                    r.id === resourceId ? { ...r, completed: !r.completed } : r
-                  ),
-                };
-              }),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) => {
+              if (ch.id !== chapterId) return ch;
+              return {
+                ...ch,
+                resources: ch.resources.map((r) =>
+                  r.id === resourceId ? { ...r, completed: !r.completed } : r
+                ),
+              };
+            }),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
   };
 
   const handleDeleteResource = (chapterId: string, resourceId: string) => {
     if (!currentCourse || !selectedSubject) return;
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== currentCourse.id) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubject.id) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) =>
-                ch.id === chapterId
-                  ? { ...ch, resources: ch.resources.filter((r) => r.id !== resourceId) }
-                  : ch
-              ),
-            };
-          }),
-        };
-      })
-    );
+    const updated = courses.map((c) => {
+      if (c.id !== currentCourse.id) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubject.id) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) =>
+              ch.id === chapterId
+                ? { ...ch, resources: ch.resources.filter((r) => r.id !== resourceId) }
+                : ch
+            ),
+          };
+        }),
+      };
+    });
+    commitLibraryState(updated);
     addToast('রিসোর্স মুছে ফেলা হয়েছে');
   };
 
@@ -437,76 +432,74 @@ export default function Home() {
   const handleSaveModal = (updated: { title: string; url?: string; type?: ResourceType }) => {
     if (!editModalState) return;
 
+    let updatedCourses = [...courses];
+
     if (editModalState.type === 'course') {
-      setCourses((prev) =>
-        prev.map((c) => (c.id === editModalState.courseId ? { ...c, name: updated.title } : c))
+      updatedCourses = courses.map((c) =>
+        c.id === editModalState.courseId ? { ...c, name: updated.title } : c
       );
       addToast('কোর্স আপডেট করা হয়েছে');
     } else if (editModalState.type === 'subject') {
-      setCourses((prev) =>
-        prev.map((c) => {
-          if (c.id !== selectedCourseId) return c;
-          return {
-            ...c,
-            subjects: c.subjects.map((s) =>
-              s.id === editModalState.subjectId ? { ...s, name: updated.title } : s
-            ),
-          };
-        })
-      );
+      updatedCourses = courses.map((c) => {
+        if (c.id !== selectedCourseId) return c;
+        return {
+          ...c,
+          subjects: c.subjects.map((s) =>
+            s.id === editModalState.subjectId ? { ...s, name: updated.title } : s
+          ),
+        };
+      });
       addToast('বিষয় আপডেট করা হয়েছে');
     } else if (editModalState.type === 'chapter') {
-      setCourses((prev) =>
-        prev.map((c) => {
-          if (c.id !== selectedCourseId) return c;
-          return {
-            ...c,
-            subjects: c.subjects.map((s) => {
-              if (s.id !== selectedSubjectId) return s;
-              return {
-                ...s,
-                chapters: s.chapters.map((ch) =>
-                  ch.id === editModalState.chapterId ? { ...ch, name: updated.title } : ch
-                ),
-              };
-            }),
-          };
-        })
-      );
+      updatedCourses = courses.map((c) => {
+        if (c.id !== selectedCourseId) return c;
+        return {
+          ...c,
+          subjects: c.subjects.map((s) => {
+            if (s.id !== selectedSubjectId) return s;
+            return {
+              ...s,
+              chapters: s.chapters.map((ch) =>
+                ch.id === editModalState.chapterId ? { ...ch, name: updated.title } : ch
+              ),
+            };
+          }),
+        };
+      });
       addToast('চ্যাপ্টার আপডেট করা হয়েছে');
     } else if (editModalState.type === 'resource') {
-      setCourses((prev) =>
-        prev.map((c) => {
-          if (c.id !== selectedCourseId) return c;
-          return {
-            ...c,
-            subjects: c.subjects.map((s) => {
-              if (s.id !== selectedSubjectId) return s;
-              return {
-                ...s,
-                chapters: s.chapters.map((ch) => {
-                  if (ch.id !== editModalState.chapterId) return ch;
-                  return {
-                    ...ch,
-                    resources: ch.resources.map((r) =>
-                      r.id === editModalState.resourceId
-                        ? {
-                            ...r,
-                            title: updated.title,
-                            url: updated.url || r.url,
-                            type: updated.type || r.type,
-                          }
-                        : r
-                    ),
-                  };
-                }),
-              };
-            }),
-          };
-        })
-      );
+      updatedCourses = courses.map((c) => {
+        if (c.id !== selectedCourseId) return c;
+        return {
+          ...c,
+          subjects: c.subjects.map((s) => {
+            if (s.id !== selectedSubjectId) return s;
+            return {
+              ...s,
+              chapters: s.chapters.map((ch) => {
+                if (ch.id !== editModalState.chapterId) return ch;
+                return {
+                  ...ch,
+                  resources: ch.resources.map((r) =>
+                    r.id === editModalState.resourceId
+                      ? {
+                          ...r,
+                          title: updated.title,
+                          url: updated.url || r.url,
+                          type: updated.type || r.type,
+                        }
+                      : r
+                  ),
+                };
+              }),
+            };
+          }),
+        };
+      });
       addToast('রিসোর্স আপডেট করা হয়েছে');
     }
+
+    commitLibraryState(updatedCourses);
   };
 
   // ---------- DRAG AND DROP REORDERING ----------
@@ -530,16 +523,15 @@ export default function Home() {
     const payload = dragPayload.current;
     if (!payload || payload.type !== 'course' || payload.id === targetCourseId) return;
 
-    setCourses((prev) => {
-      const fromIndex = prev.findIndex((c) => c.id === payload.id);
-      const toIndex = prev.findIndex((c) => c.id === targetCourseId);
-      if (fromIndex === -1 || toIndex === -1) return prev;
+    const fromIndex = courses.findIndex((c) => c.id === payload.id);
+    const toIndex = courses.findIndex((c) => c.id === targetCourseId);
+    if (fromIndex === -1 || toIndex === -1) return;
 
-      const copy = [...prev];
-      const [moved] = copy.splice(fromIndex, 1);
-      copy.splice(toIndex, 0, moved);
-      return copy;
-    });
+    const copy = [...courses];
+    const [moved] = copy.splice(fromIndex, 1);
+    copy.splice(toIndex, 0, moved);
+
+    commitLibraryState(copy);
     addToast('কোর্সসমূহের ক্রম পরিবর্তন করা হয়েছে');
     dragPayload.current = null;
   };
@@ -549,19 +541,19 @@ export default function Home() {
     const payload = dragPayload.current;
     if (!payload || payload.type !== 'subject' || payload.id === targetSubjectId) return;
 
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== selectedCourseId) return c;
-        const fromIndex = c.subjects.findIndex((s) => s.id === payload.id);
-        const toIndex = c.subjects.findIndex((s) => s.id === targetSubjectId);
-        if (fromIndex === -1 || toIndex === -1) return c;
+    const updated = courses.map((c) => {
+      if (c.id !== selectedCourseId) return c;
+      const fromIndex = c.subjects.findIndex((s) => s.id === payload.id);
+      const toIndex = c.subjects.findIndex((s) => s.id === targetSubjectId);
+      if (fromIndex === -1 || toIndex === -1) return c;
 
-        const copy = [...c.subjects];
-        const [moved] = copy.splice(fromIndex, 1);
-        copy.splice(toIndex, 0, moved);
-        return { ...c, subjects: copy };
-      })
-    );
+      const copy = [...c.subjects];
+      const [moved] = copy.splice(fromIndex, 1);
+      copy.splice(toIndex, 0, moved);
+      return { ...c, subjects: copy };
+    });
+
+    commitLibraryState(updated);
     addToast('বিষয়সমূহের ক্রম পরিবর্তন করা হয়েছে');
     dragPayload.current = null;
   };
@@ -571,25 +563,25 @@ export default function Home() {
     const payload = dragPayload.current;
     if (!payload || payload.type !== 'chapter' || payload.id === targetChapterId) return;
 
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== selectedCourseId) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubjectId) return s;
-            const fromIndex = s.chapters.findIndex((ch) => ch.id === payload.id);
-            const toIndex = s.chapters.findIndex((ch) => ch.id === targetChapterId);
-            if (fromIndex === -1 || toIndex === -1) return s;
+    const updated = courses.map((c) => {
+      if (c.id !== selectedCourseId) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubjectId) return s;
+          const fromIndex = s.chapters.findIndex((ch) => ch.id === payload.id);
+          const toIndex = s.chapters.findIndex((ch) => ch.id === targetChapterId);
+          if (fromIndex === -1 || toIndex === -1) return s;
 
-            const copy = [...s.chapters];
-            const [moved] = copy.splice(fromIndex, 1);
-            copy.splice(toIndex, 0, moved);
-            return { ...s, chapters: copy };
-          }),
-        };
-      })
-    );
+          const copy = [...s.chapters];
+          const [moved] = copy.splice(fromIndex, 1);
+          copy.splice(toIndex, 0, moved);
+          return { ...s, chapters: copy };
+        }),
+      };
+    });
+
+    commitLibraryState(updated);
     addToast('চ্যাপ্টারের ক্রম পরিবর্তন করা হয়েছে');
     dragPayload.current = null;
   };
@@ -609,31 +601,31 @@ export default function Home() {
     )
       return;
 
-    setCourses((prev) =>
-      prev.map((c) => {
-        if (c.id !== selectedCourseId) return c;
-        return {
-          ...c,
-          subjects: c.subjects.map((s) => {
-            if (s.id !== selectedSubjectId) return s;
-            return {
-              ...s,
-              chapters: s.chapters.map((ch) => {
-                if (ch.id !== targetChapterId) return ch;
-                const fromIndex = ch.resources.findIndex((r) => r.id === payload.id);
-                const toIndex = ch.resources.findIndex((r) => r.id === targetResourceId);
-                if (fromIndex === -1 || toIndex === -1) return ch;
+    const updated = courses.map((c) => {
+      if (c.id !== selectedCourseId) return c;
+      return {
+        ...c,
+        subjects: c.subjects.map((s) => {
+          if (s.id !== selectedSubjectId) return s;
+          return {
+            ...s,
+            chapters: s.chapters.map((ch) => {
+              if (ch.id !== targetChapterId) return ch;
+              const fromIndex = ch.resources.findIndex((r) => r.id === payload.id);
+              const toIndex = ch.resources.findIndex((r) => r.id === targetResourceId);
+              if (fromIndex === -1 || toIndex === -1) return ch;
 
-                const copy = [...ch.resources];
-                const [moved] = copy.splice(fromIndex, 1);
-                copy.splice(toIndex, 0, moved);
-                return { ...ch, resources: copy };
-              }),
-            };
-          }),
-        };
-      })
-    );
+              const copy = [...ch.resources];
+              const [moved] = copy.splice(fromIndex, 1);
+              copy.splice(toIndex, 0, moved);
+              return { ...ch, resources: copy };
+            }),
+          };
+        }),
+      };
+    });
+
+    commitLibraryState(updated);
     addToast('রিসোর্সের ক্রম পরিবর্তন করা হয়েছে');
     dragPayload.current = null;
   };
@@ -668,9 +660,9 @@ export default function Home() {
         const parsed = JSON.parse(reader.result as string);
         const normalized = normalizeCourses(parsed.courses || parsed.subjects);
         if (normalized.length === 0) throw new Error('Invalid schema');
-        setCourses(normalized);
-        setSelectedCourseId(normalized[0].id);
-        setSelectedSubjectId(normalized[0].subjects[0]?.id || null);
+        const nextCourseId = normalized[0].id;
+        const nextSubjectId = normalized[0].subjects[0]?.id || null;
+        commitLibraryState(normalized, nextCourseId, nextSubjectId);
         addToast('ডেটা সফলভাবে ইমপোর্ট হয়েছে');
       } catch (err) {
         addToast('ত্রুটি: সঠিক JSON ফাইল নির্বাচন করুন', 'error');
@@ -711,13 +703,13 @@ export default function Home() {
             selectedCourseId={selectedCourseId}
             selectedSubjectId={selectedSubjectId}
             onSelectCourse={(courseId) => {
-              setSelectedCourseId(courseId);
               const course = courses.find((c) => c.id === courseId);
-              setSelectedSubjectId(course && course.subjects[0] ? course.subjects[0].id : null);
+              const nextSubjectId = course && course.subjects[0] ? course.subjects[0].id : null;
+              commitLibraryState(courses, courseId, nextSubjectId);
               setSearchQuery('');
             }}
             onSelectSubject={(subjectId) => {
-              setSelectedSubjectId(subjectId);
+              commitLibraryState(courses, selectedCourseId, subjectId);
               setSearchQuery('');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
